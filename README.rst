@@ -1,7 +1,7 @@
 The ``database_wide_monte_carlo`` package, built on the `Brightway2 life cycle assessment framework <http://brightwaylca.org/>`_,  provides the means to generate precalculated sample arrays for a whole life cycle inventory (LCI) database.
 
 .. warning:: 
-	This is a fork of the original repository. Minor edits have been implemented in this fork to enable the library to operate on a local computer. 
+   This is a fork of the original repository. Minor edits have been implemented in this fork to enable the library to operate on a local computer. 
 
 
 Motivation
