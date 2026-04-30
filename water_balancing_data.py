@@ -4,13 +4,26 @@ import pickle
 import pyprind
 from collections import defaultdict
 from bw2data.backends.peewee.schema import ExchangeDataset
-from techno_water_exchange_names import intermediate_exchange_names
+from .techno_water_exchange_names import intermediate_exchange_names
+from .utils import trace_dependent_db
 
 def get_water_balancing_data(job_dir, activities, database_name, project_name,
                              sacrificial_lca):
+ 
     """Collect and save job-level data for water balancing"""
     print("getting data to balance water exchanges")
     projects.set_current(project_name)
+
+
+    ####################################################
+    #### Find the true dependent databases : 
+    list_dbs = trace_dependent_db(database_name)
+    list_dbs.append(database_name)
+
+    # Skip biosphere database
+    list_dbs = [db for db in list_dbs if db != 'biosphere3']   
+    ####################################################
+
 
     # Make folder to contain extracted information
     common_dir = os.path.join(job_dir, 'common_files')
@@ -18,28 +31,108 @@ def get_water_balancing_data(job_dir, activities, database_name, project_name,
     water_dir = os.path.join(common_dir, "water_info")
     os.makedirs(water_dir)
 
+
+
+    ######################################################################
+
+    # Modification objective : the output variables should be of identical format, for all databases
+
+    ## Identify which water flows should be considered
+    
     # Extract and save data on individual water exchanges
     print("extract data on exchanges")
-    techno_keys_product, techno_keys_waste,\
-    ef_input_keys, ef_output_keys, \
-    unit_scaling_techno_product, unit_scaling_techno_waste = \
-        get_info_on_exchanges(database_name, water_dir)
+    #techno_keys_product, techno_keys_waste,\
+    #ef_input_keys, ef_output_keys, \
+    #        unit_scaling_techno_product, unit_scaling_techno_waste = \
+    #    get_info_on_exchanges(database_name, water_dir)
 
-    print("assign water balancing strategies")
-    strategies, strategy_lists = assign_strategies(
-        database_name,
-        techno_keys_product, techno_keys_waste,
-        ef_input_keys, ef_output_keys, water_dir
-    )
+    # Run the function for all databases, then extend lists, update dictionnaries
+    techno_keys_product = []
+    techno_keys_waste = []
+    ef_input_keys = []
+    ef_output_keys = []
+    unit_scaling_techno_product = {}
+    unit_scaling_techno_waste = {}
 
+
+    # At the same time, also generate the strategies : 
+    strategies = {}
+    strategy_lists = defaultdict(list)
+
+    for db in list_dbs :
+        # The function, with temporary variables
+        sub_techno_keys_product, sub_techno_keys_waste, \
+        sub_ef_input_keys, sub_ef_output_keys,\
+        sub_unit_scaling_techno_product, sub_unit_scaling_techno_waste =\
+        get_info_on_exchanges(db,water_dir)
+
+        # Fill the variables, as required : 
+        techno_keys_product.extend(sub_techno_keys_product)
+        techno_keys_waste.extend(sub_techno_keys_waste)
+        ef_input_keys.extend(sub_ef_input_keys)
+        ef_output_keys.extend(sub_ef_output_keys)
+
+        if len(sub_unit_scaling_techno_product) >0 :
+            unit_scaling_techno_product.update(sub_unit_scaling_techno_product)
+        if len(sub_unit_scaling_techno_waste) >0 :
+            unit_scaling_techno_waste.update(sub_unit_scaling_techno_waste)
+
+        print('Done with extracting data on exchanges for database',db)
+
+        print('Assigning water balancing strategies for',db)
+        sub_strategies, sub_strategy_lists = assign_strategies(
+            db,
+            sub_techno_keys_product, sub_techno_keys_waste,
+            sub_ef_input_keys, sub_ef_output_keys, water_dir
+        )
+        #Update the overarching storage variables :
+        strategies.update(sub_strategies)
+        for k, v in sub_strategy_lists.items() :
+            strategy_lists[k].extend(v)
+            
+
+    # Moved the saving function outside the "get_info_on_exchanges" to ensure the final output is saved.
+    save_info_on_exchanges(techno_keys_product, techno_keys_waste, ef_input_keys,ef_output_keys,\
+                           unit_scaling_techno_product, unit_scaling_techno_waste,\
+                           water_dir)
+
+
+    # Moved the saving function outside the "assign strategies" to ensure the final output is saved.
+    save_assigned_strategies(strategies,strategy_lists,water_dir)
+    
+
+
+    ######################################################################
+
+
+
+    ######################################################################
+    ## Should it be an inverse, ignored, based on input, etc.
+
+    #strategies, strategy_lists = assign_strategies(
+    #    database_name,
+    #    techno_keys_product, techno_keys_waste,
+    #    ef_input_keys, ef_output_keys, water_dir
+    #)
+
+
+    #######################################################################
     print("generating data for default strategy")
-    generate_default_strategy_data(
-        strategy_lists,
-        ef_input_keys, ef_output_keys,
-        techno_keys_waste, techno_keys_product,
-        unit_scaling_techno_product, unit_scaling_techno_waste,
-        sacrificial_lca, water_dir
-    )
+
+    ## Original script modified to account for empty lists in the strategies field
+    try :
+        generate_default_strategy_data(
+            strategy_lists,
+            ef_input_keys, ef_output_keys,
+            techno_keys_waste, techno_keys_product,
+            unit_scaling_techno_product, unit_scaling_techno_waste,
+            sacrificial_lca, water_dir
+        )
+    except :
+        print('Warning, default data generation failed')
+        print(f'{strategy_lists["default"]}<- should be an empty list. Further checks required if not.')
+
+        
     print("generating data for inverse strategy")
     generate_inverse_strategy_data(
         strategy_lists,
@@ -291,6 +384,7 @@ def identify_rows_of_interest_default(
 ):
     """Identify rows that need to be considered in balancing"""
     act = get_activity(act_key)
+    
     ef_in_exc_to_balance = [
         exc.input.key for exc in act.biosphere()
         if exc.input in ef_input_keys
@@ -347,6 +441,19 @@ def identify_rows_of_interest_default(
         "techno_out_waste": techno_out_waste,
     }
 
+def save_assigned_strategies(strategies,strategy_lists,water_dir) :
+
+    file = os.path.join(water_dir, 'strategies.pickle')
+    with open(file, "wb") as f:
+        pickle.dump(strategies, f)
+
+    file = os.path.join(water_dir, 'strategy_lists.pickle')
+    with open(file, "wb") as f:
+        pickle.dump(strategy_lists, f)
+    return 
+
+
+
 def assign_strategies(database_name,
         techno_keys_product, techno_keys_waste,
         ef_input_keys, ef_output_keys, water_dir
@@ -360,54 +467,22 @@ def assign_strategies(database_name,
     strategy_lists = defaultdict(list)
     for v, k in strategies.items():
         strategy_lists[k].append(v)
+    ##### Content commented out as it is moved to a later function
+    #file = os.path.join(water_dir, 'strategies.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(strategies, f)
 
-    file = os.path.join(water_dir, 'strategies.pickle')
-    with open(file, "wb") as f:
-        pickle.dump(strategies, f)
-
-    file = os.path.join(water_dir, 'strategy_lists.pickle')
-    with open(file, "wb") as f:
-        pickle.dump(strategy_lists, f)
+    #file = os.path.join(water_dir, 'strategy_lists.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(strategy_lists, f)
 
     return strategies, strategy_lists
 
 
-
-
-def get_info_on_exchanges(database_name, water_dir):
-    """Extract and format data on water exchanges"""
-
-    # Get list of water bio exchanges
-    input_bio_exchanges, output_bio_exchanges = get_bio_exchanges(database_name)
-
-    # Get list of water techno exchanges
-    # Actual names were imported above
-    activities_with_water_reference_flows = [
-        act for act in Database(database_name)
-        if act['reference product'] in intermediate_exchange_names
-    ]
-    ww_acts = [
-        act for act in activities_with_water_reference_flows
-        if act['production amount']<0
-    ]
-    product_acts = [
-        act for act in activities_with_water_reference_flows
-        if act['production amount'] > 0
-    ]
-
-    ef_input_keys = [ef.key for ef in input_bio_exchanges]
-    ef_output_keys = [ef.key for ef in output_bio_exchanges]
-    techno_keys_waste = [techno.key for techno in ww_acts]
-    techno_keys_product = [techno.key for techno in product_acts]
+def save_info_on_exchanges(techno_keys_product, techno_keys_waste, ef_input_keys,ef_output_keys,\
+                           unit_scaling_techno_product, unit_scaling_techno_waste,\
+                           water_dir) :
     all_water_keys = ef_input_keys + ef_output_keys + techno_keys_waste + techno_keys_product
-
-    unit_scaling_techno_product = {}
-    for k in techno_keys_product:
-        unit_scaling_techno_product[k] = 1 if get_activity(k)['unit'] == "kilogram" else 1000
-
-    unit_scaling_techno_waste = {}
-    for k in techno_keys_waste:
-        unit_scaling_techno_waste[k] = 1 if get_activity(k)['unit'] == "kilogram" else 1000
 
     # Save data for reuse
 
@@ -438,6 +513,76 @@ def get_info_on_exchanges(database_name, water_dir):
     file = os.path.join(water_dir, 'unit_scaling_techno_waste.pickle')
     with open(file, "wb") as f:
         pickle.dump(unit_scaling_techno_waste, f)
+        
+    return 
+
+
+def get_info_on_exchanges(database_name, water_dir):
+    """Extract and format data on water exchanges"""
+
+    # Get list of water bio exchanges
+    input_bio_exchanges, output_bio_exchanges = get_bio_exchanges(database_name)
+
+    # Get list of water techno exchanges
+    # Actual names were imported above
+    activities_with_water_reference_flows = [
+        act for act in Database(database_name)
+        if act['reference product'] in intermediate_exchange_names
+    ]    
+    ww_acts = [
+        act for act in activities_with_water_reference_flows
+        if act['production amount']<0
+    ]
+    product_acts = [
+        act for act in activities_with_water_reference_flows
+        if act['production amount'] > 0
+    ]
+
+    ef_input_keys = [ef.key for ef in input_bio_exchanges]
+    ef_output_keys = [ef.key for ef in output_bio_exchanges]
+    techno_keys_waste = [techno.key for techno in ww_acts]
+    techno_keys_product = [techno.key for techno in product_acts]
+    #all_water_keys = ef_input_keys + ef_output_keys + techno_keys_waste + techno_keys_product
+
+    unit_scaling_techno_product = {}
+    for k in techno_keys_product:
+        unit_scaling_techno_product[k] = 1 if get_activity(k)['unit'] == "kilogram" else 1000
+
+    unit_scaling_techno_waste = {}
+    for k in techno_keys_waste:
+        unit_scaling_techno_waste[k] = 1 if get_activity(k)['unit'] == "kilogram" else 1000
+
+
+    ##### Content commented out as it is moved to a later function
+    ## Save data for reuse
+
+    #file = os.path.join(water_dir, 'ef_input_keys.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(ef_input_keys, f)
+
+    #file = os.path.join(water_dir, 'ef_output_keys.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(ef_output_keys, f)
+
+    #file = os.path.join(water_dir, 'techno_keys_waste.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(techno_keys_waste, f)
+
+    #file = os.path.join(water_dir, 'techno_keys_product.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(techno_keys_product, f)
+
+    #file = os.path.join(water_dir, 'all_water_keys.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(all_water_keys, f)
+
+    #file = os.path.join(water_dir, 'unit_scaling_techno_product.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(unit_scaling_techno_product, f)
+
+    #file = os.path.join(water_dir, 'unit_scaling_techno_waste.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(unit_scaling_techno_waste, f)
 
     return techno_keys_product, techno_keys_waste, \
            ef_input_keys, ef_output_keys, \
@@ -479,8 +624,14 @@ def activity_strategy_triage(
         ef_input_keys, ef_output_keys
 ):
     """ Determine what strategy to apply"""
-    if act['activity type']=="market activity" and act['reference product']=='tap water':
-        return 'tap_water_market'
+    ## Small edits to enable non-ecoinvent compliant databases to pass (some fields may be missing) :
+    try :
+        if act['activity type']=="market activity" and act['reference product']=='tap water':
+            return 'tap_water_market'
+    except : 
+        print('Warning,',act['name'],"in database",act['database'],"is missing an activity type.")
+
+    # Continue with following 
     exchanges = [exc for exc in act.exchanges()]
     water_exc_product_inputs = [
         exc for exc in exchanges

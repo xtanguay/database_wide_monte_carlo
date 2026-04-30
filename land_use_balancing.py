@@ -112,7 +112,7 @@ def scale_exc_default(
     rows = get_B_rows(rows_of_interest_default[act]['transformation_from_to_balance'])
     if balanced_amounts.size > 0:
         lca.biosphere_matrix[rows, col] = balanced_amounts.T
-
+    #print('default',balanced_amounts)
     return lca
 
 def scale_exc_inverse(
@@ -125,7 +125,8 @@ def scale_exc_inverse(
 
     def get_values(value_type):
 
-        matrix = lca.technosphere_matrix
+        #matrix = lca.technosphere_matrix
+        matrix = lca.biosphere_matrix
         get_rows = get_B_rows
         return np.asarray(np.squeeze((matrix[get_rows(rows_of_interest_inverse[act][value_type]), col]).todense()))
 
@@ -134,12 +135,13 @@ def scale_exc_inverse(
     land_to_static_sampled = get_values('transformation_to_static')
 
     scaling = (initial_ratios_inverse[act] * np.sum(land_from_sampled) - np.sum(land_to_static_sampled)) / np.sum(land_to_to_balance_sampled)
+    #print('inverse',scaling)
 
     balanced_amounts = scaling * land_to_to_balance_sampled
     rows = get_B_rows(rows_of_interest_inverse[act]['transformation_to_to_balance'])
     if balanced_amounts.size > 0:
         lca.biosphere_matrix[rows, col] = balanced_amounts.T
-
+    #print('inverse',balanced_amounts)
     return lca
 
 def scale_exc_static(lca, act, set_static_data):

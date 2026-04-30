@@ -295,5 +295,7 @@ def scale_exc_tap_water_market(lca, act, rows_of_interest_tap_water):
     col = lca.activity_dict[act]
     loss = 1-lca.technosphere_matrix[col, col]
     bio_row = [lca.biosphere_dict[k] for k in rows_of_interest_tap_water[act]]
-    lca.biosphere_matrix[bio_row, col] = loss
+    lca.biosphere_matrix[bio_row, col] = loss/1000 # EDITED : convert kilograms back to cubic meter.
+    print(act,bio_row,col,loss)
+          
     return lca

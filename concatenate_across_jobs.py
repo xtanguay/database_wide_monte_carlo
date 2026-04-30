@@ -9,14 +9,14 @@ import pandas as pd
 from brightway2 import *
 import datetime
 
-@click.command()
-@click.option('--base_dir', help='Path to directory with jobs', type=str) 
-@click.option('--database_name', type=str)
-@click.option('--project_name', type=str)
-@click.option('--include_inventory', default=True, type=bool)
-@click.option('--include_matrices', default=False, type=bool)
-@click.option('--include_supply', default=False, type=bool)
-@click.option('--delete_temps', help='Delete job-level concatenated files', type=bool)
+#@click.command()
+#@click.option('--base_dir', help='Path to directory with jobs', type=str) 
+#@click.option('--database_name', type=str)
+#@click.option('--project_name', type=str)
+#@click.option('--include_inventory', default=True, type=bool)
+#@click.option('--include_matrices', default=False, type=bool)
+#@click.option('--include_supply', default=False, type=bool)
+#@click.option('--delete_temps', help='Delete job-level concatenated files', type=bool)
 
 
 def concatenate_across_jobs(base_dir, database_name, project_name, 
@@ -28,27 +28,59 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
     Results are stored in a `results` folder.
 
     '''
+    # Check which data is requested to move on to the next step / exists in this assessment :
     if not any([include_inventory, include_supply, include_matrices]):
         print("No output requested. At least one of the following must be true:")
         print("save_inventory, save_supply or save_matrices")
         sys.exit(0)
 
+    # Create/look for a folder to output final results 
     results_folder = os.path.join(base_dir, database_name, 'results')
     if not os.path.isdir(results_folder):
         os.makedirs(results_folder)
-    
-    reference_folder = os.path.join(results_folder, 'reference_files')
-    if not os.path.isdir(reference_folder):
-        os.makedirs(reference_folder)
 
+    ###################################################################
+    # Moved down
+    
+    # Generate a folder to put the reference files 
+    #reference_folder = os.path.join(results_folder, 'reference_files')
+    #if not os.path.isdir(reference_folder):
+    #    os.makedirs(reference_folder)
+    ####################################################################
+
+    # Find where are the jobs stored
     job_dir = os.path.join(base_dir, database_name, 'jobs')
     jobs = sorted(glob.glob(job_dir+'/*/'))
 
-    with open(os.path.join(jobs[0], 'common_files', 'activity_UUIDs.json'), 'rb') as f:
-        activity_UUIDs = json.load(f)
+
+    # Identify which are the new jobs :
+    try :
+        with open(os.path.join(results_folder, 'log.json'), 'r') as f:
+            log = json.load(f)
+
+            if log['concatenated_accross_jobs'] :
+                pre_existing_jobs = list(log['concatenated_accross_jobs']['included_jobs'].keys())            
+                print('This folder already contains concatenated jobs! Merging new results with pre-existing ones.')
+
+    except : 
+        pre_existing_jobs = []
+
+    new_jobs = [x for x in jobs if x not in pre_existing_jobs]
+
+    if len(new_jobs) == 0 :
+        print('There is no new job to process! Exiting.')
+        return
+
+    # Load the universally unique identifiers of the activities : 
+    if len(pre_existing_jobs) != 0 : # If there are already existing results, source from there.
+        with open(os.path.join(pre_existing_jobs[0], 'common_files', 'activity_UUIDs.json'), 'rb') as f:
+            activity_UUIDs = json.load(f)
+    else :  # There is no existing results, thus, source from the first repository available.
+        with open(os.path.join(new_jobs[0], 'common_files', 'activity_UUIDs.json'), 'rb') as f:
+            activity_UUIDs = json.load(f)
 
     # Make sure all the required files are present and cover the same activities
-    for job in jobs:
+    for job in new_jobs:
         assert 'concatenated_arrays' in os.listdir(job), "Jobs missing concatenated arrays folder for job {job}"
         concatenated_dir = os.path.join(job, 'concatenated_arrays')
 
@@ -61,11 +93,22 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
         if include_matrices:
             assert 'Matrices' in os.listdir(concatenated_dir), "No matrices in concatenated folder of job {}, must run concatenate_within_jobs.py first".format(job)        
 
-    # Move common_files from job[0]: it becomes the "reference" job
-    source_dir = os.path.join(jobs[0], 'common_files')
-    files_to_move = [os.path.join(source_dir, f) for f in os.listdir(source_dir)]
-    for file in files_to_move:
-        shutil.copy(file, reference_folder)
+    ###############################################################################
+    # Generate a folder to put the reference files
+    reference_folder = os.path.join(results_folder, 'reference_files')
+
+    # Check if this is a fresh start in this folder : 
+    if not os.path.isdir(reference_folder):
+        #shutil.rmtree(reference_folder)
+
+        # Move common_files from new job[0]: it becomes the "reference" job
+        source_dir = os.path.join(new_jobs[0], 'common_files')
+
+        # New method to copy, ensuring balancing water & balancing land use folders pass this step : 
+        shutil.copytree(source_dir,reference_folder)
+
+    
+    ###############################################################################
             
     # Create ref objects
     ref_A_coo_cols = np.load(os.path.join(reference_folder, 'tech_col_indices.npy'))
@@ -106,8 +149,10 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
         activity_UUIDs = json.load(f)
     df = pd.DataFrame(index=activity_UUIDs, columns=cols)
     for act_UUID in activity_UUIDs:
-        act = get_activity((database_name, act_UUID))
+        act = get_activity((database_name, act_UUID))       
+    #####Potential CRASH POINT : if this happens, its because the dataset is missing one of the fields required by the "cols" variable.
         for field in cols:
+            print(act_UUID,field,'\n',act)
             df.loc[act_UUID, field] = act[field]
     df.to_excel(os.path.join(reference_folder, 'activity_details.xlsx'))
     
@@ -161,23 +206,42 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
         df.loc[i, 'location'] = act['location']
     df.to_excel(os.path.join(reference_folder, 'supply_array_indices_mapping.xlsx'))    
 
-    # Generate a useful Excel to get information about methods
+    # Generate a useful Excel to get information about methods    
     method_list = list(methods)
     m_method=[m[0] for m in method_list]
     m_IC1=[m[1] for m in method_list]
     m_IC2=[m[2] for m in method_list]
     m_Unit=[Method(m).metadata['unit'] for m in method_list]
     m_MD5hash=[Method(m).get_abbreviation() for m in method_list]
-    df = pd.DataFrame.from_items(
-        [
-            ('Method', m_method),
-            ('Impact category (1)', m_IC1),
-            ('Impact category (2)', m_IC2),
-            ('Unit', m_Unit),
-            ('MD5 hash', m_MD5hash),
-            ('Brightway compliant name', method_list)
-        ]
-    )
+
+
+
+    # Modernizing, as deprecated in pandas 2.1.0 :
+    cols2 = ['Method','Impact category (1)','Impact category (2)','Unit','MD5 hash','Brightway compliant name']    
+
+    a_dict =[(m_method),(m_IC1),(m_IC2),(m_Unit),(m_MD5hash),(method_list)]
+
+
+
+
+    df = pd.DataFrame.from_dict(a_dict).T   
+    df.columns= cols2
+
+    
+    #df = pd.DataFrame.from_items(
+    #    [
+    #        ('Method', m_method),
+    #        ('Impact category (1)', m_IC1),
+    #        ('Impact category (2)', m_IC2),
+    #        ('Unit', m_Unit),
+    #        ('MD5 hash', m_MD5hash),
+    #        ('Brightway compliant name', method_list)
+    #    ]
+    #)
+
+    
+
+    
     df = df.set_index('MD5 hash')
     df.to_excel(os.path.join(results_folder, 'reference_files', 'methods description.xlsx'))
     
@@ -187,11 +251,19 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
     def translate(arr, d, rev_ref_dict):
         translator = np.array([d[rev_ref_dict[row]] for row in rev_ref_dict])
         return arr[translator]
-        
+
+
+    # Concatenate the inventories 
     if include_inventory:
         for act in activity_UUIDs:
             data = []
-            for job in jobs:    
+
+            # If there is any data already concatenated : 
+            if len(pre_existing_jobs) != 0 :
+                data.append(np.load(os.path.join(results_folder,'Inventory',act+'.npy')))
+
+            # New jobs : 
+            for job in new_jobs:    
                 with open(os.path.join(job, 'common_files', 'bio_dict.pickle'), 'rb') as f:
                     bio_dict = pickle.load(f)
                 data.append(translate(
@@ -200,17 +272,27 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
                     ref_rev_bio_dict))
                 if delete_temps:
                     os.remove(os.path.join(job, 'concatenated_arrays', 'Inventory', act+'.npy'))
+
+            # Storage directory
             if not os.path.isdir(os.path.join(results_folder, 'Inventory')):
                 os.makedirs(os.path.join(results_folder, 'Inventory'))
+            # Concatenate the data and save 
             np.save(
                 os.path.join(results_folder, 'Inventory', act),
                 np.concatenate(data, axis=1)
                 )
 
+    # Concatenate the supplies :
     if include_supply:
         for act in activity_UUIDs:
             data = []
-            for job in jobs:    
+
+            # If there is any data already concatenated : 
+            if len(pre_existing_jobs) != 0 :
+                data.append(np.load(os.path.join(results_folder,'Supply',act+'npy')))
+
+            # New jobs :    
+            for job in new_jobs:    
                 with open(os.path.join(job, 'common_files', 'activity_dict.pickle'), 'rb') as f:
                     activity_dict = pickle.load(f)
                 data.append(translate(
@@ -219,13 +301,21 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
                     ref_rev_activity_dict))
                 if delete_temps:
                     os.remove(os.path.join(job, 'concatenated_arrays', 'Supply', act+'.npy'))
+            # Storage directory 
             if not os.path.isdir(os.path.join(results_folder, 'Supply')):
                 os.makedirs(os.path.join(results_folder, 'Supply'))
+            # Concatenate the data and save
             np.save(
                 os.path.join(results_folder, 'Supply', act),
                 np.concatenate(data, axis=1)
                 )
 
+    # Concatenate the matrices :
+
+    #################################
+    # Matrix concatenation is still not implemented.
+    #################################
+    
     if include_matrices:
         def create_A_indices_dict(job):
             with open(os.path.join(job, 'common_files', 'activity_dict.pickle'), 'rb') as f:
@@ -282,6 +372,9 @@ def concatenate_across_jobs(base_dir, database_name, project_name,
             os.path.join(results_folder, 'Matrices', 'B_matrix'),
             np.concatenate(data, axis=1)
             )
+
+    # End of un-updated section
+    #--------------------------------------------------------------------------------------------------------------------
     
     # Update the job logs
     for job in jobs:

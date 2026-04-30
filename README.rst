@@ -1,5 +1,9 @@
 The ``database_wide_monte_carlo`` package, built on the `Brightway2 life cycle assessment framework <http://brightwaylca.org/>`_,  provides the means to generate precalculated sample arrays for a whole life cycle inventory (LCI) database.
 
+>[!WARNING] 
+> This is a fork of the original repository. Minor edits have been implemented in this repository to enable the library to operate on a local computer. 
+
+
 Motivation
 ==========
 Precalculating Monte Carlo samples for LCA matrices and associated results (e.g. aggregated LCIs, LCIA scores) can make subsequent LCA calculations much quicker. However, independently calculating Monte Carlo samples for different products in a single database ignores correlation across LCI and LCIA results. 

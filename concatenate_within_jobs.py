@@ -46,14 +46,14 @@ def concat_vectors_worker(activity_list, output_type, job,
                     os.remove(file)
     return None
     
-@click.command()
-@click.option('--base_dir', help='Path to directory with jobs', type=str) 
-@click.option('--database_name', type=str)
-@click.option('--include_inventory', default=True, type=bool)
-@click.option('--include_matrices', default=False, type=bool)
-@click.option('--include_supply', default=False, type=bool)
-@click.option('--cpus', help='Number of CPUs allocated to this work', type=int)
-@click.option('--delete_raw_files', help='Delete raw Monte Carlo results after creation of arrays', default=False, type=bool)
+#@click.command()
+#@click.option('--base_dir', help='Path to directory with jobs', type=str) 
+#@click.option('--database_name', type=str)
+#@click.option('--include_inventory', default=True, type=bool)
+#@click.option('--include_matrices', default=False, type=bool)
+#@click.option('--include_supply', default=False, type=bool)
+#@click.option('--cpus', help='Number of CPUs allocated to this work', type=int)
+#@click.option('--delete_raw_files', help='Delete raw Monte Carlo results after creation of arrays', default=False, type=bool)
 
 def concatenate_within_jobs(base_dir, database_name, include_inventory, include_supply, include_matrices, cpus, delete_raw_files, force_through=False):
 
@@ -89,6 +89,16 @@ def concatenate_within_jobs(base_dir, database_name, include_inventory, include_
 
 
         if include_inventory:
+            # Check if this job is already internally concatenated : 
+            try :
+                with open(os.path.join(jobs_samples_folder,'log.json'),'r') as f:
+                    log = json.load(f)
+                    if log['internally_concatenated']['included_elements']['Inventory'] == 1 :
+                        print(f'{job} is already concatenated. Moving to next job.')
+                        continue                    
+            except :
+                print(f'{job} is not internally concatenated for the inventory.')
+                
             output_folder = os.path.join(base_dir, database_name, 'jobs',
                                          job, 'concatenated_arrays', 'Inventory')
             if not os.path.isdir(output_folder):
@@ -121,6 +131,18 @@ def concatenate_within_jobs(base_dir, database_name, include_inventory, include_
             for w in workers:
                 w.join()
         if include_supply:
+
+            # Check if this job is already internally concatenated : 
+            try :
+                with open(os.path.join(jobs_samples_folder,'log.json'),'r') as f:
+                    log = json.load(f)
+                    if log['internally_concatenated']['included_elements']['Supply'] == 1 :
+                        print(f'{job} is already concatenated. Moving to next job.')
+                        continue                    
+            except :
+                print(f'{job} is not internally concatenated for the Supply.')
+
+            
             output_folder = os.path.join(base_dir, 'database_name', 'jobs',
                                          job, 'concatenated_arrays', 'Supply')
             if not os.path.isdir(output_folder):

@@ -15,11 +15,15 @@ import multiprocessing as mp
 import pickle
 import sys
 import json
-from water_balancing_data import get_water_balancing_data
-from water_balancing import balance_water_exchanges
-from land_use_balancing_data import get_land_use_balancing_data
-from land_use_balancing import balance_land_use_exchanges
-
+from .water_balancing_data import get_water_balancing_data
+from .water_balancing import balance_water_exchanges
+from .land_use_balancing_data import get_land_use_balancing_data
+from .land_use_balancing import balance_land_use_exchanges
+#################################################################
+from .utils import explicit_inventory
+import pandas as pd
+from scipy import sparse
+#################################################################
 
 __author__ = "Pascal Lesage"
 __credits__ = ["Pascal Lesage, Chris Mutel, Nolwenn Kazoum"]
@@ -34,6 +38,8 @@ class direct_solving_MC(MonteCarloLCA, DirectSolvingMixin):
     pass
 
 
+##################################################################################
+# MODIFIED FUNCTION CALL :
 def correlated_MCs_worker(project_name,
                           job_dir,
                           job_id,
@@ -41,6 +47,8 @@ def correlated_MCs_worker(project_name,
                           functional_units_list,
                           iterations,
                           include_inventory,
+                          include_extended_inventory, # Added to diagnose MC simulations
+                          diagnose_indiv_act, # Added to diagnose an individual dataset
                           include_supply,
                           include_matrices,
                           balance_water,
@@ -77,8 +85,10 @@ def correlated_MCs_worker(project_name,
         lca.rebuild_technosphere_matrix(lca.tech_rng.next())
         lca.rebuild_biosphere_matrix(lca.bio_rng.next())
         if balance_water:
+
             lca = balance_water_exchanges(lca, os.path.join(job_dir, 'common_files'))
         if balance_land_use:
+            
             lca = balance_land_use_exchanges(lca, os.path.join(job_dir, 'common_files'))
 
         if include_matrices:
@@ -125,6 +135,41 @@ def correlated_MCs_worker(project_name,
                         os.path.join(inventory_dir, actKey),
                         np.array(lca.inventory, dtype = np.float32)
                         )
+
+
+                ##########################################################
+                # Modifications : add an "explicit inventory" for diagnosing Monte Carlo simulations
+                if include_extended_inventory :
+                    explicit_inventory_dir = os.path.join(index_dir,'explicit_inventory')
+                    if not os.path.isdir(explicit_inventory_dir):
+                        os.makedirs(explicit_inventory_dir)
+                    lca = explicit_inventory(lca)
+
+
+                    ##### Use scipy.sparse.save_npz to save the sparse matrices instead of full on numpy arrays? (large)
+                    #### Will require scipy.sparse.load_npz to re-open.
+
+                    sparse.save_npz(os.path.join(explicit_inventory_dir,actKey),
+                        lca.explicit_inventory.tocoo())
+
+                # Modifications : add a specific activity check for diagnosing Monte Carlo simulations :
+                if diagnose_indiv_act != None :
+                    if actKey == diagnose_indiv_act[0][1]:
+                        # Verify if this sample fails the threshold :
+                        lca.lcia = (lca.biosphere_matrix * lca.supply_array * diagnose_indiv_act[1]).sum()
+                        if not diagnose_indiv_act[2] < lca.lcia < diagnose_indiv_act[3] : 
+                            # Check how many samples already within this folder : 
+                                #Skip for now.
+                            # Look for a dedicated folder to store the characterized results :  
+                            diagnosed_act_explicit_inventory_dir = os.path.join(index_dir,'diagnosed_explicit_inventory')
+                            if not os.path.isdir(diagnosed_act_explicit_inventory_dir):
+                                os.makedirs(diagnosed_act_explicit_inventory_dir)
+                            # Characterize the inventory and save :
+                            lca = explicit_inventory(lca)
+                            sparse.save_npz(os.path.join(diagnosed_act_explicit_inventory_dir,actKey),
+                                lca.explicit_inventory.tocoo())
+
+                ##########################################################
     print(
         "Worker {} finished {} iterations".format(
             worker_id, 
@@ -193,22 +238,39 @@ def get_useful_info(collector_functional_unit, job_dir, activities, database_nam
 
     return None
             
-@click.command()
-@click.option('--project_name', default='default', help='Brightway2 project name', type=str)
-@click.option('--database_name', help='Database name', type=str)
-@click.option('--iterations', default=1000, help='Number of Monte Carlo iterations', type=int)
-@click.option('--cpus', default=mp.cpu_count(), help='Number of used CPU cores', type=int)
-@click.option('--base_dir', help='Base directory path for precalculated samples', type=str)
-@click.option('--include_inventory', help='Save inventory vector', default=True, type=bool)
-@click.option('--include_supply', help='Save supply vector', default=False, type=bool)
-@click.option('--include_matrices', help='Save A and B matrices', default=False, type=bool)
-@click.option('--balance_water', help='Balance water exchanges', default=False, type=bool)
-@click.option('--balance_land_use', help='Balance land use exchanges', default=False, type=bool)
+#@click.command()
+#@click.option('--project_name', default='default', help='Brightway2 project name', type=str)
+#@click.option('--database_name', help='Database name', type=str)
+#@click.option('--iterations', default=1000, help='Number of Monte Carlo iterations', type=int)
+#@click.option('--cpus', default=mp.cpu_count(), help='Number of used CPU cores', type=int)
+#@click.option('--base_dir', help='Base directory path for precalculated samples', type=str)
+#@click.option('--include_inventory', help='Save inventory vector', default=True, type=bool)
+#@click.option('--include_supply', help='Save supply vector', default=False, type=bool)
+#@click.option('--include_matrices', help='Save A and B matrices', default=False, type=bool)
+#@click.option('--balance_water', help='Balance water exchanges', default=False, type=bool)
+#@click.option('--balance_land_use', help='Balance land use exchanges', default=False, type=bool)
 
-def generate_samples_job(project_name, database_name, iterations, 
+
+
+############################################################################################################
+# ORIGINAL FUNCTION CALL :
+
+#def generate_samples_job(project_name, database_name, iterations, 
+#                         cpus, base_dir, 
+#                         include_inventory=False, include_supply=False, 
+#                         include_matrices=False, balance_water=False, balance_land_use=False):
+
+
+# MODIFIED FUNCTION CALL :
+def generate_samples_job(project_name, database_name,iterations, 
                          cpus, base_dir, 
-                         include_inventory=False, include_supply=False, 
+                         include_inventory=False, include_supply=False,
+                         include_extended_inventory = False, # Added to diagnose MC simulations
+                         diagnose_indiv_act = None, # Added to diagnose individual dataset within MC simulations
                          include_matrices=False, balance_water=False, balance_land_use=False):
+
+#############################################################################################################
+
     """Parent function for database-wide sample generation 
     
     Arguments: 
@@ -286,6 +348,8 @@ def generate_samples_job(project_name, database_name, iterations,
 
     # Generate and save job-level information
     collector_functional_unit = {k:v for d in functional_units for k, v in d.items()}
+
+    #### Get useful info --> get_water_balancing_data ; get_land_balancing_data
     get_useful_info(collector_functional_unit, job_dir, activities, database_name, project_name, balance_water, balance_land_use)
 
     # Calculate number of iterations per worker.
@@ -296,6 +360,8 @@ def generate_samples_job(project_name, database_name, iterations,
     # Dispatch actual sampling work to workers
     workers = []
     for worker_id in range(cpus):
+        #####################################################################
+        # Edited to include an extended invetory to diagnose MC simulations
         child = mp.Process(target=correlated_MCs_worker,
                            args=(
                                project_name,
@@ -305,6 +371,8 @@ def generate_samples_job(project_name, database_name, iterations,
                                functional_units,
                                it_per_worker[worker_id],
                                include_inventory,
+                               include_extended_inventory, # Added row to diagnose MC simulations
+                               diagnose_indiv_act, # Added row to diagnose an individual activity
                                include_supply,include_matrices,
                                balance_water,
                                balance_land_use

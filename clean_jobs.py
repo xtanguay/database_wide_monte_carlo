@@ -9,13 +9,13 @@ from collections import defaultdict
 import json
 import datetime
 
-@click.command()
-@click.option('--base_dir', help='Root directory for all presampling files', type=str)
-@click.option('--database_name', help='Name of database', type=str)
-@click.option('--database_size', help='Number of activities in database', type=int)
-@click.option('--include_inventory', default=True, type=bool)
-@click.option('--include_matrices', default=False, type=bool)
-@click.option('--include_supply', default=False, type=bool)
+#@click.command()
+#@click.option('--base_dir', help='Root directory for all presampling files', type=str)
+#@click.option('--database_name', help='Name of database', type=str)
+#@click.option('--database_size', help='Number of activities in database', type=int)
+#@click.option('--include_inventory', default=True, type=bool)
+#@click.option('--include_matrices', default=False, type=bool)
+#@click.option('--include_supply', default=False, type=bool)
 
 def clean_jobs(base_dir,
                database_name,
@@ -36,13 +36,37 @@ def clean_jobs(base_dir,
     print("Cleaning up jobs: {}".format(jobs))
     jobs_to_delete = []
     iterations_to_delete = defaultdict(list)
-    
+
+
+    # Individual job
+    #----------------------------------------------
     for job in jobs:
         job_folders = glob.glob(os.path.join(job_dir, job)+'/*/')
+
+        print('JOB FOLDER PRINT ----------------')
+        print(job)
+
+        try:            
+            with open(os.path.join(job, 'log.json'), 'r') as f:
+                log = json.load(f)
+                if log['cleaned'] :
+                    print('This job was already cleaned. Skipping to next job.')
+                    continue
+                    
+        except:
+            print("Couldn't open the log file. This job is assumed to be new and requires cleaning...")
         
-        for job_folder in job_folders:
+
+
+        # Individual iterations in a job
+        #------------------------------------------
+        for job_folder in job_folders:          
             if "common_files" in job_folder:
-                if len(os.listdir(job_folder)) != 11:
+
+                # Edit : 11 files to generate, but if balance water/balance land use, there are also FOLDERS
+                files = [ f for f in os.listdir( job_folder ) if os.path.isfile(job_folder+f) ]
+                if len(files) != 11:
+                #if len(os.listdir(job_folder)) != 11:                
                     print("job to be deleted: {}, because it had {} files".format(
                         job, len(os.listdir(job_folder)))
                         )
@@ -116,6 +140,9 @@ def clean_jobs(base_dir,
         try:
             with open(os.path.join(job, 'log.json'), 'r') as f:
                 log = json.load(f)
+                if log['cleaned'] :
+                    continue
+                
         except:
             print("couldn't open log")
             log = {}

@@ -1,4 +1,51 @@
 
+intermediate_exchange_names = [ # ecoinvent 3.12 cutoff
+'wastewater, unpolluted',
+'wastewater from plywood production',
+'water, harvested from rainwater',
+'wastewater, average',
+'wastewater from PV cell production',
+'wastewater from ground granulated blast furnace slag production',
+'wastewater from textile production',
+'heavy water',
+'water, completely softened',
+'wastewater from black chrome coating',
+'water, deionised',
+'wastewater from liquid crystal display production',
+'wastewater from cathode ray tube production',
+'wastewater from pig iron production',
+'wastewater from PET pelletising',
+'water, decarbonised',
+'wastewater from tube collector production',
+'wastewater from concrete production',
+'wastewater from ammonium paratungstate production',
+'tap water',
+'wastewater from soft fibreboard production',
+'wastewater from grass refinery',
+'wastewater from medium density board production',
+'wastewater from recycling of waste PET',
+'wastewater from potato starch production',
+'water discharge from petroleum extraction, offshore',
+'wastewater from anaerobic digestion of whey',
+'wastewater from maize starch production',
+'wastewater from liquid crystal display backlight production',
+'wastewater from glass production',
+'wastewater from hard fibreboard production',
+'water discharge from petroleum/natural gas extraction, onshore',
+'water, ultrapure',
+'wastewater from particle board production',
+'wastewater from liquid crystal production',
+'wastewater from wafer fabrication',
+'wastewater from vegetable oil refinery',
+'wastewater from ceramic production',
+'wastewater from recycling of waste PP',
+'wastewater from lorry production',
+'rainwater mineral oil storage',
+'irrigation',
+]
+
+
+"""
 intermediate_exchange_names = [ # ecoinvent 3.4 cutoff
     'heavy water',
     'irrigation',
@@ -39,3 +86,6 @@ intermediate_exchange_names = [ # ecoinvent 3.4 cutoff
     'water, deionised, from tap water, at user',
     'water, ultrapure'
 ]
+
+
+"""

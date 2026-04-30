@@ -4,7 +4,7 @@ import pickle
 import pyprind
 from collections import defaultdict
 from bw2data.backends.peewee.schema import ExchangeDataset
-
+from .utils import trace_dependent_db
 
 def get_land_use_balancing_data(
         job_dir,
@@ -22,16 +22,72 @@ def get_land_use_balancing_data(
     land_use_dir = os.path.join(common_dir, "land_use_info")
     os.makedirs(land_use_dir)
 
-    # Extract and save data on individual land transformation exchanges
-    print("extract data on exchanges")
-    transformation_from, transformation_to = get_info_on_exchanges(database_name, land_use_dir)
 
-    print("assign balancing strategies")
-    strategies, strategy_lists = assign_strategies(
-        database_name,
-        transformation_from, transformation_to,
-        land_use_dir
-    )
+    #########################################################
+    ## Modifs made :
+    ## 1 - Make a loop to true dependent databases
+    ## 2 - Delay pickle file saving (make new fx)
+    #####
+
+    # Original code blocks :
+
+    # Extract and save data on individual land transformation exchanges
+    #print("extract data on exchanges")
+    #transformation_from, transformation_to = get_info_on_exchanges(database_name, land_use_dir)
+
+    #print("assign balancing strategies")
+    #strategies, strategy_lists = assign_strategies(
+    #    database_name,
+    #    transformation_from, transformation_to,
+    #    land_use_dir
+    #)
+
+
+    # New code blocks : 
+
+    print("extracting data on exchanges and assigning balancing strategies")
+    
+    # Find true dependent databases : 
+    list_dbs = trace_dependent_db(database_name)
+    # Include the target database itself.
+    list_dbs.append(database_name) 
+    # Remove biosphere database
+    list_dbs = [db for db in list_dbs if db !='biosphere3']
+
+
+    # Storage variables : 
+    # Specific to "get_info_on_exchanges"
+    transformation_from = []
+    transformation_to = []
+
+    # Specific to "assign_strategies" 
+    strategies = {}
+    strategy_lists = defaultdict(list)
+
+    # Get info on exchanges, but for all dependent databases :
+    for db in list_dbs :
+        sub_transformation_from, sub_transformation_to = get_info_on_exchanges(db,land_use_dir)
+
+        transformation_from.extend(sub_transformation_from)
+        transformation_to.extend(sub_transformation_to)
+
+        sub_strategies, sub_strategy_lists = assign_strategies(
+            db,
+            sub_transformation_from, sub_transformation_to,
+            land_use_dir)
+
+        strategies.update(sub_strategies)
+        for k, v in sub_strategy_lists.items() :
+            strategy_lists[k].extend(v)
+        print('Done with land use data extraction and balancing strategies assignment for',db)
+
+    # Once done with iterating through the databases, create pickle files : 
+    save_info_on_exchanges(transformation_from,transformation_to,land_use_dir) 
+    save_assigned_strategies(strategies,strategy_lists,land_use_dir)
+
+
+    ##########################################################
+    
     print("generating data for default strategy")
     generate_default_strategy_data(
         strategy_lists,
@@ -143,9 +199,9 @@ def identify_rows_of_interest_inverse(
     ]
 
     return {
-        "tranformation_from": ef_from,
-        "tranformation_to_static": ef_to_static,
-        "tranformation_to_to_balance": ef_to_to_balance
+        "transformation_from": ef_from,
+        "transformation_to_static": ef_to_static,
+        "transformation_to_to_balance": ef_to_to_balance
     }
 
 
@@ -222,18 +278,37 @@ def identify_rows_of_interest_default(
         "transformation_to": ef_to,
     }
 
+
 def assign_strategies(database_name,
-                      tranformation_from, transformation_to,
+                      transformation_from, transformation_to,
                       land_use_dir):
     strategies = {}
     for act in pyprind.prog_bar(Database(database_name)):
         strategies[act.key] = activity_strategy_triage(
             act,
-            tranformation_from, transformation_to)
+            transformation_from, transformation_to)
 
     strategy_lists = defaultdict(list)
     for v, k in strategies.items():
         strategy_lists[k].append(v)
+
+    ###################################################################
+    # Following lines commented out to split in two functions
+    #file = os.path.join(land_use_dir, 'strategies.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(strategies, f)
+
+    #file = os.path.join(land_use_dir, 'strategy_lists.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(strategy_lists, f)
+    ####################################################################
+
+    return strategies, strategy_lists
+
+
+def save_assigned_strategies(strategies, strategy_lists,land_use_dir):
+    "Save data from assign_strategies in pickle files for reuse"
+    # In seperate function to allow for dependent databases
 
     file = os.path.join(land_use_dir, 'strategies.pickle')
     with open(file, "wb") as f:
@@ -241,9 +316,9 @@ def assign_strategies(database_name,
 
     file = os.path.join(land_use_dir, 'strategy_lists.pickle')
     with open(file, "wb") as f:
-        pickle.dump(strategy_lists, f)
+        pickle.dump(strategy_lists, f)    
 
-    return strategies, strategy_lists
+    return 
 
 
 def get_info_on_exchanges(database_name, land_use_dir):
@@ -260,16 +335,33 @@ def get_info_on_exchanges(database_name, land_use_dir):
         and check_bio_exc_used_by_database(ef.key, database_name)
     ]
 
+    ###################################################################
+    # Following lines commented out to split in two functions
+
     # Save data for reuse
+    #file = os.path.join(land_use_dir, 'transformation_from_keys.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(transformation_from, f)
+
+    #file = os.path.join(land_use_dir, 'transformation_to_keys.pickle')
+    #with open(file, "wb") as f:
+    #    pickle.dump(transformation_to, f)
+    ####################################################################
+
+    return transformation_from, transformation_to
+
+def save_info_on_exchanges(transformation_from, transformation_to, land_use_dir) :
+    "Save data from get_info_exchanges in pickle files for reuse"
+    # In seperate function to allow for dependent databases
+
     file = os.path.join(land_use_dir, 'transformation_from_keys.pickle')
     with open(file, "wb") as f:
         pickle.dump(transformation_from, f)
 
     file = os.path.join(land_use_dir, 'transformation_to_keys.pickle')
     with open(file, "wb") as f:
-        pickle.dump(transformation_to, f)
-
-    return transformation_from, transformation_to
+        pickle.dump(transformation_to, f)    
+    return
 
 
 def check_bio_exc_used_by_database(ef_key, db_name):

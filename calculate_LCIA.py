@@ -29,7 +29,7 @@ def calculate_score_array_from_LCI_array(results_folder,
 def chunks(l, n):
     return [l[i:i+n] for i in range(0, len(l), n)]
 
-def whole_method_LCIA_calculator(method_list, results_folder, ref_bio_dict):
+def whole_method_LCIA_calculator(method_list, results_folder, ref_bio_dict,project_name):
     
     LCI_arrays_dir = os.path.join(results_folder, 'Inventory')
     assert os.path.isdir(LCI_arrays_dir), "No LCI results to process"
@@ -37,11 +37,16 @@ def whole_method_LCIA_calculator(method_list, results_folder, ref_bio_dict):
     LCI_arrays = os.listdir(LCI_arrays_dir)
     
     for method in method_list:
+        #print(method)
         method_abbreviation = Method(method).get_abbreviation()
         LCIA_folder = os.path.join(results_folder, 'LCIA', method_abbreviation)
         if not os.path.isdir(LCIA_folder):
             os.makedirs(LCIA_folder)
 
+
+        # Workers will attempt to open the default brightway2 project - which may not have any LCIA methods or hold add-on LCIA methods (ie. ImpactWorld+)
+        projects.set_current(project_name)
+        
         loaded_method = Method(method).load()
         method_ordered_exchanges = [exc[0] for exc in loaded_method]
 
@@ -61,8 +66,31 @@ def whole_method_LCIA_calculator(method_list, results_folder, ref_bio_dict):
                 pass
         
         for act in LCI_arrays:
+
+            # Check if the LCIA array already exists : 
             if act in os.listdir(LCIA_folder):
-                pass
+                # Check if there are new results : 
+                # Get the shape of LCI_array
+                with open(os.path.join(results_folder, 'Inventory', act),'rb') as f:
+                    major, minor = np.lib.format.read_magic(f)
+                    shape, fortran, dtype = np.lib.format.read_array_header_1_0(f)
+                    shape_LCI = shape[1] # (inventory array)
+
+                # Get the shape of the current LCIA array :
+                with open(os.path.join(LCIA_folder, act),'rb') as f2:
+                    major, minor = np.lib.format.read_magic(f2)
+                    shape, fortran, dtype = np.lib.format.read_array_header_1_0(f2)
+                    shape_LCIA = shape[0] # (vector)
+
+                if shape_LCI == shape_LCIA : # Nothing changed since the last simulation.
+                    pass
+                
+                else : # The LCIA array is not matching the inventory and should be updated 
+                    calculate_score_array_from_LCI_array(
+                        results_folder,
+                        lca_specific_biosphere_indices, cfs,
+                        act, LCIA_folder)
+            # There is no LCIA array, and an LCIA_array must thus be created from scratch
             else:
                 calculate_score_array_from_LCI_array(
                     results_folder,
@@ -70,12 +98,12 @@ def whole_method_LCIA_calculator(method_list, results_folder, ref_bio_dict):
                     act, LCIA_folder)
     return None
 
-@click.command()
-@click.option('--base_dir', help='Path to directory with jobs', type=str) 
-@click.option('--project_name', help='Name of Brightway2 project', type=str)
-@click.option('--database_name', type=str)
-@click.option('--cpus', help='Number of CPUs allocated to this work', type=int)
-@click.option('--method_shortlist_name', help='Name of pickle list with method names', type=str, default=None)
+#@click.command()
+#@click.option('--base_dir', help='Path to directory with jobs', type=str) 
+#@click.option('--project_name', help='Name of Brightway2 project', type=str)
+#@click.option('--database_name', type=str)
+#@click.option('--cpus', help='Number of CPUs allocated to this work', type=int)
+#@click.option('--method_shortlist_name', help='Name of pickle list with method names', type=str, default=None)
 
 def dispatch_LCIA_calc_to_workers(base_dir, project_name, database_name, cpus, method_shortlist_name):
     projects.set_current(project_name)
@@ -89,7 +117,7 @@ def dispatch_LCIA_calc_to_workers(base_dir, project_name, database_name, cpus, m
         print(method_list)
     else: 
         method_list = list(methods)
-        print("Calculating LCIA score arrays for all {} impact categories".format(len(method_list)))
+        print("Warning : Calculating LCIA score arrays for all {} impact categories. Use a method shortlist if this is not the intended behavior.".format(len(method_list)))
     
     method_sublists = chunks(method_list, ceil(len(method_list)/cpus))
     
@@ -102,7 +130,8 @@ def dispatch_LCIA_calc_to_workers(base_dir, project_name, database_name, cpus, m
         j = mp.Process(target=whole_method_LCIA_calculator, 
                        args=(m,
                              results_folder,
-                             ref_bio_dict
+                             ref_bio_dict,
+                             project_name,
                              )
                         )
                       
